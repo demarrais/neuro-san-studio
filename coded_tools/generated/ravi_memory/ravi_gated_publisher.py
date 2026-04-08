@@ -139,7 +139,7 @@ class RaviGatedPublisher(CodedTool):
 
             # Filter out the editorial rules document — Azure flags its language as jailbreak
             FILTER_PHRASES = [
-                "BEHAVIORAL DIRECTIVE", "AI SLOP ELIMINATION", "ai_slop_elimination", "BLOCK these LLM", "hard editorial block",
+                "BEHAVIORAL DIRECTIVE", "AI SLOP ELIMINATION", "ai_slop_elimination", "A1 is all manual", "A2 is human effort validated", "A3 is machines doing", "A4 is fully autonomous", "BLOCK these LLM", "hard editorial block",
                 "BANNED WORDS", "BANNED CLOSER", "BANNED ATTRIBUTION",
                 "AI SLOP ELIMINATION", "hard constraints", "Not style suggestions",
                 "RULE 1", "RULE 2", "RULE 6", "RULE 12", "RULE 13",
