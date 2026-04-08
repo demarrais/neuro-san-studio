@@ -22,6 +22,9 @@ from typing import Any
 from typing import Dict
 from typing import List
 
+import tempfile
+from pathlib import Path
+from urllib.parse import urlparse
 from langchain_community.document_loaders import PyMuPDFLoader
 from langchain_core.documents import Document
 from langchain_core.vectorstores import VectorStore
@@ -72,17 +75,32 @@ class PdfRag(CodedTool, BaseRag):
         # Validate presence of required inputs
         if not query:
             return "❌ Missing required input: 'query'."
-        if not urls:
+        # Allow empty urls if loading from a pre-built vector store
+        vector_store_path = args.get("vector_store_path", "")
+        if not urls and not vector_store_path:
             return "❌ Missing required input: 'urls'."
 
         # Vector store type
         vector_store_type: str = args.get("vector_store_type", "in_memory")
+        if isinstance(vector_store_type, str):
+            vector_store_type = vector_store_type.strip().lower().replace("-", "_")
+            if vector_store_type in ("inmemory", "in_memory", "memory"):
+                vector_store_type = "in_memory"
+        args["vector_store_type"] = vector_store_type
 
         # Save the generated vector store as a JSON file if True
         self.save_vector_store = args.get("save_vector_store", False)
 
         # Configure the vector store path
-        self.configure_vector_store_path(args.get("vector_store_path"))
+        raw_path = args.get("vector_store_path")
+        if raw_path:
+            data_dir = Path(os.getenv("NEURO_SAN_DATA_DIR", str(Path.cwd() / ".neuro_san")))
+            data_dir.mkdir(parents=True, exist_ok=True)
+            p = Path(raw_path)
+            vector_store_path = p if p.is_absolute() else (data_dir / p)
+            self.configure_vector_store_path(str(vector_store_path))
+        else:
+            self.configure_vector_store_path(None)
 
         # For PostgreSQL vector store
         if vector_store_type == "postgres":
@@ -107,23 +125,52 @@ class PdfRag(CodedTool, BaseRag):
 
     async def load_documents(self, loader_args: Dict[str, Any]) -> List[Document]:
         """
-        Load PDF documents from URLs.
-
-        :param loader_args: Dictionary containing 'urls' (list of PDF file URLs)
-        :return: List of loaded PDF documents
+        Load PDF documents from URLs or local paths.
+        Downloads http(s) URLs to a temp file before loading.
         """
         docs: List[Document] = []
         urls: List[str] = loader_args.get("urls", [])
 
         for url in urls:
+            tmp_path = None
             try:
-                loader = PyMuPDFLoader(file_path=url)
+                path_for_loader = url
+
+                if isinstance(url, str) and url.strip().lower().startswith(("http://", "https://")):
+                    parsed = urlparse(url.strip())
+                    ext = Path(parsed.path).suffix.lower()
+                    if ext != ".pdf":
+                        logger.warning("Skipping non-PDF URL: %s", url)
+                        continue
+
+                    import aiohttp
+                    async with aiohttp.ClientSession() as session:
+                        async with session.get(url) as resp:
+                            resp.raise_for_status()
+                            blob = await resp.read()
+
+                    fd, tmp_path = tempfile.mkstemp(suffix=".pdf")
+                    os.close(fd)
+                    with open(tmp_path, "wb") as f:
+                        f.write(blob)
+                    path_for_loader = tmp_path
+
+                loader = PyMuPDFLoader(file_path=path_for_loader)
                 doc: List[Document] = await loader.aload()
                 docs.extend(doc)
-                logger.info("Successfully loaded PDF file from %s", url)
+                logger.info("Successfully loaded PDF from %s", url)
+
             except FileNotFoundError:
                 logger.error("File not found: %s", url)
             except ValueError as e:
-                logger.error("Invalid file path or unsupported input: %s – %s", url, e)
+                logger.error("Invalid path or unsupported input: %s – %s", url, e)
+            except Exception as e:
+                logger.exception("Failed to load %s: %s", url, e)
+            finally:
+                if tmp_path and os.path.exists(tmp_path):
+                    try:
+                        os.remove(tmp_path)
+                    except Exception:
+                        pass
 
         return docs

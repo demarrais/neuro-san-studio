@@ -87,4 +87,6 @@
     #     python -m run --server-http-port 8081 --nsflow-port 4174
     "agent_network_architect.hocon": false,
 
+    # Ravi Kumar S digital twin
+    "ravi_kumar_s_twin.hocon": true,
 }

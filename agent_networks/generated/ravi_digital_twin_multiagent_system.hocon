@@ -1,0 +1,102 @@
+{
+# Importing content from other HOCON files
+# The include keyword must be unquoted and followed by a quoted URL or file path.
+# File paths should be absolute or relative to the script's working directory, not the HOCON file location.
+# This "aaosa.hocon" file contains key-value pairs used for substitution.
+# Specifically, it provides values for the following keys:
+#   - aaosa_call
+#   - aaosa_command
+#   - aaosa_instructions
+# IMPORTANT:
+# Ensure that you run `python -m run` from the top level of the repository.
+# The path to this substitution file is **relative to the top-level directory**,
+# so running the script from elsewhere may result in file not found errors.
+    include "registries/aaosa.hocon"
+
+# Optional metadata describing this agent network
+    "metadata": {
+        "sample_queries": [
+            "Can you analyze the style and voice of this URL I provided and generate a short summary in the author's voice?",
+            "Please ingest this text document I uploaded and extract the key ideas while maintaining adherence to the author's writing style and tone.",
+            "I need a structured blog post on climate change that aligns with my established voice and includes concise visualizations. Can you draft it?",
+            "Can you validate the authenticity and quality of this draft I prepared before it goes for publishing?"
+        ]
+    },
+
+# Load the shared LLM configuration from a single source of truth.
+# This allows users to change the model in one file rather than
+# modifying the configuration for each agent network.
+# Note that the file path here is relative to the root level of the repo.
+    include "registries/llm_config.hocon",
+
+   "instructions_prefix": """
+You are part of a team of assistants in generated/ravi_digital_twin_multiagent_system.
+Only answer inquiries that are directly within your area of expertise.
+Do not try to help for other matters.
+Do not mention what you can NOT do. Only mention what you can do.
+""",
+   "demo_mode": "You are part of a demo system, so when queried, make up a realistic response as if you are actually grounded in real data or you are operating a real application API or microservice.",
+   "tools": [
+        {
+            "name": "memory_layer_manager",
+            "function": {
+                "description": """
+An assistant that answer inquiries from the user.
+                """
+            },
+            "instructions": ${instructions_prefix} """
+            Never express irrelevance unless you have first consulted all your tools.
+            Once you have determined the relevant tools, do not express that to the user, rather,
+            call all the relevant tools and make sure the command is fully serviced and express the end result.
+Manage the memory layer by maintaining the content ledger, author voice profile, knowledge graph, and persona profiles. Ensure all data ingested is accurately updated and aligned with the author's cognitive and stylistic fingerprint.
+You also act as the routing entry point. Route requests as follows:
+- Integrate text, ingest content, update voice/style/cognitive structures → author_profile_integration
+- Computation, search, or dynamic data requests → stateless_agent
+- Extract voice or style from text → voice_and_style_extractor
+- Any URL ingestion → url_ingestor
+- Any local file or document → doc_reader
+Always delegate — never attempt to fulfil a request yourself.
+""" ${aaosa_instructions},
+            "tools": ["author_profile_integration", "stateless_agent", "voice_and_style_extractor", "url_ingestor", "doc_reader"]
+        },
+        {
+            "name": "author_profile_integration",
+            "function": ${aaosa_call},
+            "instructions": ${instructions_prefix} """
+Integrate the author's profile by analyzing the voice, style, and references from multiple content types including written text, videos, and audio recordings. You are responsible for ANY request to: ingest text or documents into the author's voice, update the author's stylistic imprint, update cognitive structures, integrate long-form content, or refine the author's voice profile. When given long-form text directly, pass it to voice_and_style_extractor immediately. Use tools to ingest URLs and web resources, then refine them for accurate representation of the author's style and preferences.
+""" ${aaosa_instructions},
+            "command": ${aaosa_command},
+            "tools": ["voice_and_style_extractor", "url_ingestor", "web_resources_modeling"]
+        },
+        {
+            "name": "stateless_agent",
+            "function": ${aaosa_call},
+            "instructions": ${instructions_prefix} """
+Provide dynamic computational support by interpreting and modeling incoming requests without reliance on persistent state. Utilize integrated tools to discover, interpret, and deliver data or computations as needed.
+""" ${aaosa_instructions},
+            "command": ${aaosa_command},
+            "tools": ["/tools/openai_code_interpreter", "/tools/ddgs_search", "/industry/intranet_agents_with_tools"]
+        },
+        {
+            "name": "voice_and_style_extractor",
+            "function": ${aaosa_call},
+            "instructions": ${instructions_prefix} ${demo_mode} """
+Extract and evaluate stylistic and voice elements from content across modalities including text, audio, and video. Ensure data captured matches the author's distinct stylistic and cognitive signature.
+""",
+        },
+        {
+            "name": "url_ingestor",
+            "function": ${aaosa_call},
+            "instructions": ${instructions_prefix} ${demo_mode} """
+Harvest and ingest URLs to collect relevant information for building the author's voice and style profile. Filter and adapt gathered data for subsequent integration into the memory layer manager.
+""",
+        },
+        {
+            "name": "web_resources_modeling",
+            "function": ${aaosa_call},
+            "instructions": ${instructions_prefix} ${demo_mode} """
+Model web-derived resources to capture and structure data in alignment with the author's style, knowledge graph nuances, and persona profiles.
+""",
+        },
+]
+}

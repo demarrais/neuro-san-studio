@@ -30,7 +30,7 @@ from langchain_core.documents import Document
 from langchain_core.embeddings import Embeddings
 from langchain_core.vectorstores import VectorStore
 from langchain_core.vectorstores.base import VectorStoreRetriever
-from langchain_openai import OpenAIEmbeddings
+from langchain_openai import AzureOpenAIEmbeddings, OpenAIEmbeddings
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from sqlalchemy.exc import ProgrammingError
 
@@ -70,7 +70,29 @@ class BaseRag(ABC):
         # Save the generated vector store as a JSON file if True
         self.save_vector_store: bool = False
         self.abs_vector_store_path: Optional[str] = None
-        self.embeddings: Embeddings = OpenAIEmbeddings(model=EMBEDDINGS_MODEL, dimensions=VECTOR_SIZE)
+        # Use local sentence-transformers embeddings — no API key required
+        try:
+            from langchain_huggingface import HuggingFaceEmbeddings
+            self.embeddings: Embeddings = HuggingFaceEmbeddings(
+                model_name="sentence-transformers/all-MiniLM-L6-v2"
+            )
+        except ImportError:
+            # Fallback: try Azure if available, else standard OpenAI
+            azure_key = os.getenv("AZURE_OPENAI_API_KEY")
+            azure_endpoint = os.getenv("AZURE_OPENAI_ENDPOINT")
+            deployment = os.getenv("AZURE_EMBEDDING_DEPLOYMENT", "")
+            if azure_key and azure_endpoint and deployment:
+                from langchain_openai import AzureOpenAIEmbeddings
+                self.embeddings: Embeddings = AzureOpenAIEmbeddings(
+                    azure_deployment=deployment,
+                    azure_endpoint=azure_endpoint,
+                    api_key=azure_key,
+                    api_version=os.getenv("OPENAI_API_VERSION", "2024-10-21"),
+                )
+            else:
+                self.embeddings: Embeddings = OpenAIEmbeddings(
+                    model=EMBEDDINGS_MODEL, dimensions=VECTOR_SIZE
+                )
 
     @abstractmethod
     async def load_documents(self, loader_args: Any) -> list[Document]:

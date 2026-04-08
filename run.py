@@ -32,6 +32,15 @@ from plugins.env_validator.env_validator import EnvValidator
 from plugins.log_bridge.process_log_bridge import ProcessLogBridge
 from plugins.phoenix.phoenix_plugin import PhoenixPlugin
 
+def load_editorial_directive():
+    import os
+    g = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'editorial_guide__anti_ai_slop.txt')
+    if os.path.exists(g):
+        os.environ['EDITORIAL_DIRECTIVE_PATH'] = g
+        print('Editorial directive loaded.')
+    else:
+        print('Warning: editorial_guide__anti_ai_slop.txt not found.')
+
 
 class NeuroSanRunner:
     """Command-line tool to run the Neuro SAN server and web client."""
@@ -187,10 +196,12 @@ class NeuroSanRunner:
 
     def set_environment_variables(self):
         """Set required environment variables, optionally using neuro-san defaults."""
+        load_editorial_directive()
         print("\n" + "=" * 50 + "\n")
         print("Setting environment variables...\n")
         # Common env variables
         os.environ["PYTHONPATH"] = self.root_dir
+        os.environ["PYTHONDONTWRITEBYTECODE"] = "1"
         os.environ["AGENT_MANIFEST_FILE"] = self.args["agent_manifest_file"]
         os.environ["AGENT_TOOL_PATH"] = self.args["agent_tool_path"]
         os.environ["AGENT_TOOLBOX_INFO_FILE"] = self.args["agent_toolbox_info_file"]
