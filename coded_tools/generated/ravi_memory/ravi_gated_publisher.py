@@ -139,7 +139,7 @@ class RaviGatedPublisher(CodedTool):
 
             # Filter out the editorial rules document — Azure flags its language as jailbreak
             FILTER_PHRASES = [
-                "BEHAVIORAL DIRECTIVE", "BLOCK these LLM", "hard editorial block",
+                "BEHAVIORAL DIRECTIVE", "AI SLOP ELIMINATION", "ai_slop_elimination", "BLOCK these LLM", "hard editorial block",
                 "BANNED WORDS", "BANNED CLOSER", "BANNED ATTRIBUTION",
                 "AI SLOP ELIMINATION", "hard constraints", "Not style suggestions",
                 "RULE 1", "RULE 2", "RULE 6", "RULE 12", "RULE 13",
@@ -188,8 +188,9 @@ class RaviGatedPublisher(CodedTool):
 
 Writing guidelines:
 - Write in flowing prose paragraphs. Avoid numbered lists, bullet points, and section headers.
+- Only reference the Hollywood Model of delivery if the request is specifically about staffing, talent models, or team structure. Do not insert it generically into posts about other topics.
 - The opening sentence must be one of these patterns: a bold claim ("Talk of an AI bubble is overblown."), a rhetorical provocation ("What happens when society embraces a technology faster than it can absorb its consequences?"), or a direct statistic from the source material below. Do not open with "In today's", "As the world", "The AI adoption", or any general landscape-setting phrase.
-- Use at least 2 specific statistics drawn ONLY from the source material provided below. Copy figures exactly as they appear. Do NOT invent or use any figure not present in the source material below. Specifically avoid: 1,200 engagements, 57 patents, 12,000 roles, 230,000 employees, 83 million jobs, 69 million jobs, $13 trillion, or any figure not explicitly present in the source material below.
+- Use at least 2 specific statistics drawn ONLY from the source material provided below. Copy figures exactly as they appear. Do NOT invent or use any figure not present in the source material below. Specifically avoid: 1,200 engagements, 57 patents, 12,000 roles, 230,000 employees, 20% of global organizations, 30% increase in efficiency, 83 million jobs, 69 million jobs, $13 trillion, or any figure not explicitly present in the source material below.
 - Use em-dashes sparingly — at most one per 500 words. Replace extras with commas, colons, or periods.
 - Close with a declarative forward-looking statement. Do not end with a question. Do not add any commentary after the post ends. The post ends; it does not explain itself or invite discussion.
 - Avoid these words: paradigm, robust, pivotal, tapestry, delve, unprecedented, seamlessly, transformative.

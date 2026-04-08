@@ -91,6 +91,12 @@ GOOD_CLOSER_PATTERNS = [
     r"shared prosperity",
     r"every worker",
     r"build.*systems",
+    r"force multiplier",
+    r"equipping every",
+    r"belonging to those who",
+    r"future belongs",
+    r"talk of an ai bubble",
+    r"ai builder",
 ]
 
 
