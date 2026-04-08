@@ -216,3 +216,4 @@ content_generator
 doc_reader
 url_ingestor
 voice_and_style_extractor
+.neuro_san/
