@@ -203,3 +203,16 @@ registries/generated/
 
 # test local only
 registries/manifest.hocon.test
+ravi_chroma_db/
+chroma_db/
+*.bak
+*.bak2
+*.pptx
+*.save
+1
+2
+6
+content_generator
+doc_reader
+url_ingestor
+voice_and_style_extractor
