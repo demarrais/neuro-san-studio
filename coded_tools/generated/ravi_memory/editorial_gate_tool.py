@@ -204,7 +204,7 @@ class EditorialGateTool(CodedTool):
         found_banned = [w for w in BANNED_WORDS if w.lower() in draft_lower]
         if found_banned:
             violations.append(
-                f"BANNED WORDS found: {found_banned}. Remove every instance before resubmitting."
+                f"Prohibited words found: {found_banned}. Revise to remove these words."
             )
 
         # 2. Statistics check — hard block if zero, soft warning if 1 or 2
