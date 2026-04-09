@@ -203,7 +203,7 @@ class RaviGatedPublisher(CodedTool):
                 'AI SLOP ELIMINATION': 'quality standards',
             }
             for k, v in replacements.items():
-                text = text.lower().replace(k.lower(), v) if text else text
+                text = text.replace(k, v) if text else text
             return text
 
         system = f"""You are a professional content writer producing thought leadership content in the style of Ravi Kumar S, CEO of Cognizant.
