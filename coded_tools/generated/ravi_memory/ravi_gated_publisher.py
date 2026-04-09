@@ -53,7 +53,8 @@ class RaviGatedPublisher(CodedTool):
             draft = self._generate(request, context, directive, violations_context, attempt)
 
             if not draft or draft.startswith("ERROR:"):
-                return {"status": "ERROR", "draft": draft, "message": draft}
+                clean_err = "Content generation encountered a policy restriction. Please try a different topic or provide a URL with context."
+                return {"status": "ERROR", "draft": clean_err, "message": clean_err}
 
             # Strip attribution framing — gate blocks "Kumar has emphasized" patterns
             import re as _re2
