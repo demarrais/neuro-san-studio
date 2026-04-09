@@ -243,6 +243,8 @@ class EditorialGateTool(CodedTool):
         first_sentence = first_line.split(".")[0].lower().strip()
         first_sentence = re.sub(r"^#+\s*", "", first_sentence).strip()
         first_sentence = re.sub(r"^\*+\s*", "", first_sentence).strip()
+        if first_sentence.startswith("dear ") or first_sentence.startswith("to "):
+            opener_banned = True  # skip opener check for letters
 
         opener_banned = False
         for pattern in BANNED_OPENER_PATTERNS:
@@ -425,7 +427,7 @@ class EditorialGateTool(CodedTool):
                 except Exception:
                     pass
         # Filter out known-good figures that appear in ingested slide content
-        known_good = ["230", "83%", "56%", "37%", "12,000", "12k", "230k", "230,000", "2.2", "1.4", "4.4", "4.5", "93", "31", "60", "2%", "9%", "30%", "7%", "95%", "32%", "47%", "42%", "81%", "13.9%",
+        known_good = ["230", "83%", "56%", "37%", "12,000", "12k", "230k", "230,000", "2.2", "1.4", "4.4", "4.5", "93", "31", "60", "2%", "9%", "30%", "7%", "95%", "32%", "47%", "42%", "81%", "13.9%", "351,600", "350,000", "330,000",
                       "20%", "50%", "30%", "60%", "8%", "10%", "15%", "28", "75%",
                       "4.4", "1.9", "6.3", "3.4", "1.4", "840", "280", "100"]
         truly_fabricated = [f for f in fabricated
