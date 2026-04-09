@@ -1,8 +1,8 @@
-ROLE: EDITORIAL DIRECTIVE - WRITING STANDARDS
+WRITING STANDARDS GUIDE
 SOURCE: How LLMs Distort Our Written Language - Abdulhai, White et al., 2026
 THIS IS NOT A KNOWLEDGE SOURCE.
-APPLY TO: All written output, post-research, pre-delivery.
-BLOCK: Filler affirmations, hedge stacking, neutral stance drift,
+SCOPE: All written output.
+AVOID: Filler affirmations, hedge stacking, neutral stance drift,
 pronoun erasure, emotional inflation, analytical inflation,
 colloquialism removal, vocabulary substitution, conclusion-altering edits.
 PRESERVE: Argumentative stance, first-person voice, anecdotes,
