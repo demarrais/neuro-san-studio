@@ -85,8 +85,11 @@ class RaviGatedPublisher(CodedTool):
             # Remove lone small percentages that are likely fabricated
             import re as _re3
             # Replace isolated small percentages not in known-good list with prose
-            known_pct = ['93%', '83%', '56%', '50%', '20%', '65%', '30%', '70%', '8%', '10%', '21%', '14%', '5.8%', '40%'
-                '2%', '9%', '14%', '3.9%', '10%', '5%',
+            known_pct = [
+                '93%', '83%', '56%', '50%', '20%', '65%', '30%', '70%',
+                '8%', '10%', '2%', '9%', '14%', '3.9%', '5%', '6%', '7%',
+                '21%', '14%', '5.8%', '40%', '11%', '12%', '13%', '15%',
+                '13.3%', '13.4%', '13.5%', '13.6%', '13.7%', '13.8%',
             ]
             def replace_unknown_pct(m):
                 p = m.group(0)
