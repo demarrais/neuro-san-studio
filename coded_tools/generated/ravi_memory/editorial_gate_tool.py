@@ -1,164 +1,358 @@
-from neuro_san.interfaces.coded_tool import CodedTool
-import os, re, logging
-import chromadb
-from chromadb.config import Settings
+"""
+editorial_gate_tool.py
 
-logger = logging.getLogger(__name__)
-_CHROMA_PATH = os.environ.get("RAVI_CHROMA_PATH", "./ravi_chroma_db")
-COLLECTION = "ravi_voice_knowledge"
+EditorialGateTool for the Ravi Kumar S digital twin.
+Enforces voice fidelity, editorial quality, and semantic similarity
+against the verbatim transcript stored in ChromaDB (ravi_voice_primary).
 
+Supports content_type parameter for per-format opener/closer standards:
+  transcript   — verbatim spoken word (default, strictest)
+  blog         — written long-form thought leadership
+  white_paper  — formal research/policy document
+  social       — LinkedIn or short-form post
+  press_release — quote or statement for media
+  letter       — direct address to an individual or group
+
+Neuro SAN coded tool — invoke via agent network or CLI test harness.
+"""
+
+import json
+import os
+import re
+import sys
+from typing import Any
+
+try:
+    import chromadb
+    CHROMA_AVAILABLE = True
+except ImportError:
+    CHROMA_AVAILABLE = False
+
+
+# ── Gate Configuration ────────────────────────────────────────────────────────
+
+CHROMA_DB_PATH       = "./chroma_db"
+COLLECTION_NAME      = "ravi_voice_primary"
+SIMILARITY_THRESHOLD = 0.75
+TOP_K_CHUNKS         = 3
+
+# Banned words — violate Ravi's voice standards
 BANNED_WORDS = [
-    "paradigm", "robust", "pivotal", "tapestry", "delve", "herculean",
-    "cusp", "rejuvenation", "beckons", "paving the way", "stands as a testament",
-    "reflects broader trends", "inaction is not an option", "transformative swell",
-    "on the brink", "it is important to note", "in conclusion",
-    "as we stand", "it is imperative", "moral imperative",
-    "unleash", "synergy", "game-changer", "groundbreaking",
-    "rapid evolution", "rapidly evolving", "dizzying disruption",
+    "utilize", "synergy", "synergize", "holistic", "ecosystem",
+    "bandwidth", "circle back", "deep dive", "boil the ocean",
+    "move the needle", "low-hanging fruit", "paradigm shift", "value-add",
+    "learnings", "ideate", "socialize", "democratize", "empower",
+    "transformative", "game-changer", "revolutionary",
+    "cutting-edge", "best-in-class", "world-class", "robust",
+    "actionable insights", "thought leader", "pivot",
+    "hollywood-style", "intentionality and purpose", "co-creation",
+    "currency of success", "the road ahead", "meaningful impact for all",
+    "at the forefront", "ensures", "hopefully", "we trust",
+    "leaning into", "reshaping the playing field",
 ]
 
-REQUIRED_STATS = []  # Not used — stat detection is regex-based
+# ── Per-Content-Type Opener/Closer Standards ──────────────────────────────────
 
-# Opener must NOT be a generic AI statement
-BANNED_OPENER_PATTERNS = [
-    r"^the (rapid|rise|advent|age|era|dawn|power|promise|potential|transformative) (rise )?of (artificial intelligence|ai)",
-    r"^artificial intelligence (is|has|continues)",
-    r"^as (we|the world|society|businesses)",
-    r"^in today",
-    r"^amid the",
-    r"^in the age of",
-    r"^we are (living|entering|witnessing)",
-    r"^the (future|world|era|age) of ai",
+OPENER_STANDARDS = {
+    "transcript": {
+        "signals": [
+            "i mean", "you know", "um,", "uh,", "the reality is",
+            "i would say", "look,", "here's the thing", "let me",
+            "if you reflect", "i actually", "i think",
+        ],
+        "description": (
+            "Opener should have spoken cadence: 'I mean,', 'You know,', "
+            "'The reality is...', 'I would say...'"
+        ),
+    },
+    "blog": {
+        "signals": [
+            "talk of", "what happens when", "the question is not",
+            "every ", "the ", "there is a ", "there are ", "we are ",
+            "two years ago", "for years", "the most ", "industry ",
+            "something is ", "a new ", "this is not ", "when ",
+            "93%", "90%", "50%", "nearly", "the single",
+        ],
+        "description": (
+            "Blog opener should be a direct provocation, statistic, or strong claim. "
+            "Examples: 'Talk of an AI bubble is overblown.' / "
+            "'What happens when society embraces a technology faster than it can absorb its consequences?'"
+        ),
+    },
+    "white_paper": {
+        "signals": [
+            "the evidence", "this paper", "across industries", "the data",
+            "for the past", "over the last", "research indicates",
+            "the question before", "three forces", "four forces",
+            "the central argument", "this analysis", "the case for",
+            "industry value", "the fundamental", "as of ",
+        ],
+        "description": (
+            "White paper opener should establish the research frame, central argument, "
+            "or the key evidential claim being examined."
+        ),
+    },
+    "social": {
+        "signals": [
+            "i", "we", "the ", "what ", "why ", "how ", "here's",
+            "a question", "three things", "one thing", "something ",
+            "unpopular opinion", "hot take", "fact:", "truth:",
+        ],
+        "description": (
+            "Social post opener should be direct and attention-grabbing. "
+            "First person or a punchy declarative claim."
+        ),
+    },
+    "press_release": {
+        "signals": [
+            "today", "announced", "cognizant", "the acquisition",
+            "the partnership", "this collaboration", "this agreement",
+            "we are", "i am", "this marks", "the combination",
+        ],
+        "description": (
+            "Press release opener should state the news, company, or action directly. "
+            "Ravi quotes should anchor on strategic significance, not pleasantries."
+        ),
+    },
+    "letter": {
+        "signals": [
+            "i am writing", "i want to", "as we", "over the past",
+            "this has been", "when i reflect", "i have spent",
+            "the work we", "to our", "dear ", "colleagues,",
+            "i believe", "one year ago", "two years ago",
+        ],
+        "description": (
+            "Letter opener should establish personal voice and direct address. "
+            "First person, reflective or purposeful tone."
+        ),
+    },
+}
+
+CLOSER_STANDARDS = {
+    "transcript": {
+        "signals": [
+            "so", "and that is", "that is the", "which means", "therefore",
+            "because", "if we can", "only if", "the ones who", "that's the power",
+            "that is the power",
+        ],
+        "description": (
+            "Closer should end declaratively: 'That is the power of...', "
+            "'And only if we...', 'Which means...'"
+        ),
+    },
+    "blog": {
+        "signals": [
+            "will come from", "will not come from", "the ones who",
+            "that is the", "only if", "the most important",
+            "will define", "will redefine", "what this moment",
+            "the question is", "the answer is", "that is what",
+            "outcomes.", "the future.", "value.", "results.",
+            "understands this.", "chooses this.", "demands this.",
+        ],
+        "description": (
+            "Blog closer should end with a forward-looking provocation or declarative claim. "
+            "Model: 'The most important innovation of the coming decade will not come from "
+            "artificial intelligence. It will come from empowering every worker to use it.'"
+        ),
+    },
+    "white_paper": {
+        "signals": [
+            "this requires", "the implication is", "the recommendation",
+            "organizations that", "companies that", "the firms that",
+            "the path forward", "the evidence points", "what this means",
+            "the industry must", "leaders must", "requires action",
+            "the window", "this is the moment", "the decision",
+        ],
+        "description": (
+            "White paper closer should end with a policy recommendation, "
+            "call to action, or evidence-grounded forward claim."
+        ),
+    },
+    "social": {
+        "signals": [
+            "agree?", "thoughts?", "what do you think?", "worth reading.",
+            "share this.", "the future is", "this is why", "it matters.",
+            "that's the shift.", "the question is", "are you ready",
+            "will you", "join us", "link in bio", "link below",
+        ],
+        "description": (
+            "Social closer should invite engagement or land a punchy final claim."
+        ),
+    },
+    "press_release": {
+        "signals": [
+            "together", "at scale", "for our clients", "for enterprises",
+            "the future of", "this is what", "this is how",
+            "value for", "outcomes for", "results for",
+            "forward.", "ahead.", "next.", "possible.",
+        ],
+        "description": (
+            "Press release quote closer should land on strategic significance "
+            "or client/market impact. Not a pleasantry."
+        ),
+    },
+    "letter": {
+        "signals": [
+            "thank you", "i am grateful", "with confidence", "with optimism",
+            "forward together", "ahead of us", "what we build",
+            "the work continues", "i look forward", "sincerely",
+            "the opportunity ahead", "what comes next",
+        ],
+        "description": (
+            "Letter closer should end with gratitude, forward orientation, "
+            "or a call to shared action."
+        ),
+    },
+}
+
+# Attribution framing
+ATTRIBUTION_PHRASES = [
+    "as i call it", "as we call it", "i've written", "i've spoken",
+    "what i mean by", "in my", "we call it", "i would say",
+    "i mean,", "you know,", "i have spoken",
 ]
 
-# Opener SHOULD match one of these patterns (provocation, data, observation)
-GOOD_OPENER_PATTERNS = [
-    r"\d+%",                          # starts with a stat
-    r"\$\d",                          # starts with a dollar figure
-    r"^what happens when",             # rhetorical provocation
-    r"^talk of",                       # direct assertion
-    r"^the most important",            # strong claim
-    r"^consider",                      # direct address
-    r"^here is",                       # direct claim
-    r"^history",                       # historical provocation
-    r"^work is",                       # grounded claim
-    r"^intelligence is",               # grounded claim
-]
-
-# Closer must NOT be a summary or inspirational platitude
-BANNED_CLOSER_PHRASES = [
-    "it's not just about",
-    "it is not just about",
-    "the choices we make today",
-    "together we can",
-    "let us not forget",
-    "the time to act",
-    "let this be the generation",
-    "doesn't deepen divides but bridges them",
-    "as we move forward",
-    "supplements humanity",
-    "accelerates economic divides",
-    "collective progress",
-    "transformative age",
-    "shared opportunity",
-    "by taking action now",
-    "the opportunity is",
-    "this is a moment",
-    "this moment calls for",
-    "hinges on shared",
-    "call to action",
-    "the road ahead",
-    "the path forward",
-    "only time will tell",
-]
-
-# Closer SHOULD match one of these patterns (forward provocation)
-GOOD_CLOSER_PATTERNS = [
-    r"may not come from artificial intelligence",
-    r"empowering every worker",
-    r"will come from",
-    r"the question (is|now|that) ",
-    r"if \d",
-    r"that outcome is not inevitable",
-    r"constraint has",
-    r"new jobs are born",
-    r"not just the few",
-    r"benefits.*broadly",
-    r"ensure.*ai.*benefits",
-    r"empower.*thrive",
-    r"intelligence age",
-    r"social contract",
-    r"shared prosperity",
-    r"every worker",
-    r"build.*systems",
-    r"force multiplier",
-    r"equipping every",
-    r"belonging to those who",
-    r"future belongs",
-    r"talk of an ai bubble",
-    r"ai builder",
+# Framework vocabulary
+FRAMEWORK_VOCABULARY = [
+    "first principles", "1st principles", "reforge", "digital labor",
+    "ai builder", "context engineering", "probabilistic", "deterministic",
+    "vector 1", "vector 2", "vector 3",
+    "a1", "a2", "a3", "a4", "rate card",
+    "outcome", "underwriting", "player coach", "agent manager",
+    "verification economy", "pyramid", "interdisciplinary",
+    "system integrator", "frontier model", "neural network",
+    "throughput", "platform shift", "swim lane", "value engine",
+    "labor-based", "outcome-based", "managed services",
 ]
 
 
-BANNED_ATTRIBUTION_PHRASES = [
-    "ravi kumar s calls",
-    "ravi kumar s has",
-    "ravi kumar s often",
-    "kumar has termed",
-    "kumar has called",
-    "kumar has often",
-    "kumar has described",
-    "kumar has emphasized",
-    "kumar has stressed",
-    "kumar has noted",
-    "kumar has argued",
-    "kumar has stated",
-    "kumar has said",
-    "as kumar",
-    "as ravi kumar",
-    "ravi kumar s said",
-    "ravi kumar s describes",
-    "ravi kumar s emphasizes",
-    "ravi kumar s believes",
-]
+# ── Individual Gate Checks ────────────────────────────────────────────────────
 
-_client = None
-
-def _get_client():
-    global _client
-    if _client is not None:
-        return _client
-    try:
-        _client = chromadb.PersistentClient(
-            path=_CHROMA_PATH,
-            settings=Settings(anonymized_telemetry=False)
-        )
-    except Exception as e:
-        logger.warning("EditorialGateTool: ChromaDB unavailable: %s", e)
-    return _client
+def check_banned_words(text: str) -> dict:
+    text_lower = text.lower()
+    found = [w for w in BANNED_WORDS if w in text_lower]
+    return {
+        "passed": len(found) == 0,
+        "check": "banned_words",
+        "violations": found,
+        "message": (
+            f"Banned words detected: {found}. Remove these — they violate Ravi's voice."
+            if found else "No banned words detected."
+        ),
+    }
 
 
-def check_statistics(text: str) -> dict:
-    import re
-    found = re.findall(r"\d+\.?\d*\s*%|\d+\.?\d*x\b|\d{4}\s*occupations|\d+,\d+\s*tasks|\d+\s*professions", text.lower())
+def check_opener_quality(text: str, content_type: str = "blog") -> dict:
+    standard = OPENER_STANDARDS.get(content_type, OPENER_STANDARDS["blog"])
+    first_150 = text[:150].lower()
+    found = [s for s in standard["signals"] if s in first_150]
+    passed = len(found) > 0
+    return {
+        "passed": passed,
+        "check": "opener_quality",
+        "content_type": content_type,
+        "signals_found": found,
+        "message": (
+            f"Opener meets {content_type} standard."
+            if passed else
+            f"WEAK OPENER: \"{text[:80].lower()}\". {standard['description']}"
+        ),
+    }
+
+
+def check_closer_quality(text: str, content_type: str = "blog") -> dict:
+    standard = CLOSER_STANDARDS.get(content_type, CLOSER_STANDARDS["blog"])
+    last_150 = text[-150:].lower()
+    found = [s for s in standard["signals"] if s in last_150]
+    passed = len(found) > 0
+    return {
+        "passed": passed,
+        "check": "closer_quality",
+        "content_type": content_type,
+        "signals_found": found,
+        "message": (
+            f"Closer meets {content_type} standard."
+            if passed else
+            f"WEAK CLOSER: {standard['description']}"
+        ),
+    }
+
+
+def check_framework_vocabulary(text: str) -> dict:
+    text_lower = text.lower()
+    found = [v for v in FRAMEWORK_VOCABULARY if v in text_lower]
     passed = len(found) >= 2
     return {
         "passed": passed,
-        "check": "statistics",
-        "stats_found": found,
+        "check": "framework_vocabulary",
+        "terms_found": found,
         "message": (
-            f"Statistics present: {found}"
+            f"Framework vocabulary present: {found}"
             if passed else
-            "MISSING STATISTICS: Include at least 2 statistics grounded in ingested content. "
-            "Call memory_query_tool with the draft topic to retrieve relevant verbatim figures. "
-            "Do NOT invent or reuse the same figures repeatedly."
+            f"Too few framework terms. Found only: {found}. "
+            f"Output should use at least 2 of Ravi's established vocabulary."
+        ),
+    }
+
+
+def check_attribution_framing(text: str) -> dict:
+    text_lower = text.lower()
+    found = [p for p in ATTRIBUTION_PHRASES if p in text_lower]
+    passed = len(found) >= 1
+    return {
+        "passed": passed,
+        "check": "attribution_framing",
+        "phrases_found": found,
+        "message": (
+            "Attribution framing present."
+            if passed else
+            "No attribution framing. Ravi uses phrases like 'as I call it', "
+            "'as we call it', 'what I mean by', 'I've spoken about this'."
+        ),
+    }
+
+
+def check_header_structure(text: str) -> dict:
+    lines = text.split("\n")
+    header_lines = [l.strip() for l in lines if l.strip().startswith("#")]
+    passed = len(header_lines) == 0
+    return {
+        "passed": passed,
+        "check": "header_structure",
+        "header_lines_found": header_lines,
+        "message": (
+            "No markdown headers — correct format."
+            if passed else
+            f"Output contains markdown headers which break voice fidelity. "
+            f"Use verbal numbering, not headers. Found: {header_lines}"
+        ),
+    }
+
+
+def check_list_format(text: str) -> dict:
+    violations = []
+    lines = text.strip().split("\n")
+    for line in lines:
+        stripped = line.strip()
+        if re.match(r'^\d+[\.\):]', stripped):
+            violations.append(f"Numbered list item: {stripped[:60]}")
+        if re.match(r'^(Vector|Step|Phase|Stage|Point)\s+\d+[:\-]', stripped, re.IGNORECASE):
+            violations.append(f"Labeled list item: {stripped[:60]}")
+    passed = len(violations) == 0
+    return {
+        "passed": passed,
+        "check": "list_format",
+        "violations": violations,
+        "message": (
+            "No prohibited list formatting."
+            if passed else
+            f"Numbered or labeled list items found. Use prose instead: {violations}"
         ),
     }
 
 
 def check_em_dashes(text: str) -> dict:
-    import re
-    count = len(re.findall(r"\u2014|(?<!-)--(?!-)", text))
+    count = len(re.findall(r"—|(?<!-)--(?!-)", text))
     word_count = len(text.split())
     allowed = max(1, word_count // 500)
     passed = count <= allowed
@@ -177,319 +371,220 @@ def check_em_dashes(text: str) -> dict:
     }
 
 
-class EditorialGateTool(CodedTool):
-
-    _VERSION = "v3-editorial-gate"
-
-    def invoke(self, args: dict, sly_data: dict = None) -> dict:
-        if isinstance(args, dict) and "args" in args:
-            inner = args["args"]
-            if isinstance(inner, list) and len(inner) > 0:
-                args = inner[0]
-            elif isinstance(inner, dict):
-                args = inner
-
-        draft = args.get("draft", "").strip()
-        if not draft:
-            return {
-                "status": "ERROR",
-                "violations": ["No draft text provided."],
-                "message": "ERROR: You must write the complete draft FIRST before calling this tool. Write the full blog post or content piece, then pass the entire text as the draft argument. Do not call editorial_gate_tool until the draft is fully written.",
-            }
-
-        violations = []
-        draft_lower = draft.lower()
-
-        # 1. Banned words
-        found_banned = [w for w in BANNED_WORDS if w.lower() in draft_lower]
-        if found_banned:
-            violations.append(
-                f"Prohibited words found: {found_banned}. Revise to remove these words."
-            )
-
-        # 2. Statistics check — hard block if zero, soft warning if 1 or 2
-        import re as _re_stats
-        found_stats = _re_stats.findall(r"\d+\.?\d*\s*%|\d+\.?\d*x\b|\d{1,3}(?:,\d{3})+", draft)
-        stat_warning = None
-        if len(found_stats) == 0:
-            violations.append(
-                "MISSING STATISTICS: Must include at least 2 statistics grounded in ingested content. "
-                "Call memory_query_tool with the draft topic to retrieve relevant verbatim statistics. "
-                "Do NOT invent figures. Use only what the knowledge base returns."
-            )
-        elif len(found_stats) < 2:
-            violations.append(
-                f"INSUFFICIENT STATISTICS: Only {len(found_stats)} found: {found_stats}. Include at least 2."
-            )
-
-
-        # Word count enforcement - fail if draft is under 80% of requested length
-        import re as _re2
-        word_count = len(draft.split())
-        word_count_match = _re2.search(r'(\d+)[- ]word', draft_lower)
-        # Check if the original request embedded a word count hint in sly_data or check for very short output
-        # Gate enforces minimum 150 words for any blog/op-ed, 50 for social posts
-        social_keywords = ["linkedin", "twitter", "x post", "tweet", "social"]
-        is_social = any(k in draft_lower for k in social_keywords)
-        min_words = 50 if is_social else 150
-        if word_count < min_words:
-            violations.append(
-                f"DRAFT TOO SHORT: {word_count} words. Minimum is {min_words} words for this content type. "
-                f"Expand the draft substantially before resubmitting."
-            )
-
-        # 3. Opener: must not be generic AND should be a provocation/data point
-        first_line = draft.strip().split("\n")[0]
-        first_sentence = first_line.split(".")[0].lower().strip()
-        first_sentence = re.sub(r"^#+\s*", "", first_sentence).strip()
-        first_sentence = re.sub(r"^\*+\s*", "", first_sentence).strip()
-        if first_sentence.startswith("dear ") or first_sentence.startswith("to "):
-            opener_banned = True  # skip opener check for letters
-
-        opener_banned = False
-        for pattern in BANNED_OPENER_PATTERNS:
-            if re.search(pattern, first_sentence):
-                violations.append(
-                    f"BANNED OPENER: \"{first_sentence[:120]}\". "
-                    f"Must open with a specific data point, provocation, or direct observation. "
-                    f"NOT a generic statement about AI. "
-                    f"Good openers from Ravi's corpus: "
-                    f"\"Talk of an AI bubble is overblown.\" or "
-                    f"\"What happens when society embraces a technology faster than it can absorb its consequences?\""
-                )
-                opener_banned = True
-                break
-
-        if not opener_banned:
-            opener_good = any(re.search(p, first_sentence) for p in GOOD_OPENER_PATTERNS)
-            if not opener_good:
-                violations.append(
-                    f"WEAK OPENER: \"{first_sentence[:120]}\". "
-                    f"Opener should be a specific statistic, direct provocation, or strong claim. "
-                    f"Examples from ingested Ravi content: "
-                    f"\"Talk of an AI bubble is overblown.\" / "
-                    f"\"What happens when society embraces a technology faster than it can absorb its consequences?\""
-                )
-
-        # 4. Closer: must not summarize AND should provoke forward
-        paragraphs = [p.strip() for p in draft.strip().split("\n\n") if p.strip()]
-        last_para = paragraphs[-1].lower() if paragraphs else ""
-
-        closer_banned = False
-        for phrase in BANNED_CLOSER_PHRASES:
-            if phrase in last_para:
-                violations.append(
-                    f"BANNED CLOSER: \"{phrase}\". "
-                    f"Closing must NOT summarize or inspire with platitudes. "
-                    f"Must provoke forward. "
-                    f"Best closer from Ravi's ingested corpus: "
-                    f"\"The most important innovation of the coming decade may not come from artificial intelligence. "
-                    f"It will come from empowering every worker to use it to generate economic and societal value.\""
-                )
-                closer_banned = True
-                break
-
-        if not closer_banned:
-            closer_good = any(re.search(p, last_para) for p in GOOD_CLOSER_PATTERNS)
-            if not closer_good:
-                violations.append(
-                    f"WEAK CLOSER: Last paragraph does not end with a forward-looking provocation. "
-                    f"Use ingested Ravi content as the model: "
-                    f"\"The most important innovation of the coming decade may not come from artificial intelligence. "
-                    f"It will come from empowering every worker to use it to generate economic and societal value.\""
-                )
-
-        # 5. Header structure
-        bold_colon = len(re.findall(r"\*\*[^*]+:\*\*", draft))
-        hash_colon = len(re.findall(r"#{1,4}\s+[^\n]+:", draft))
-        if bold_colon >= 3 or hash_colon >= 3:
-            violations.append(
-                f"BANNED STRUCTURE: {bold_colon + hash_colon} bold/header lines with colons as primary structure. "
-                f"Ravi writes in paragraphs with embedded structure, not listicles."
-            )
-
-
-        # 7. Third-person attribution check — impersonation-adjacent framing
-        found_attribution = [p for p in BANNED_ATTRIBUTION_PHRASES if p in draft_lower]
-        if found_attribution:
-            violations.append(
-                f"BANNED ATTRIBUTION framing found: {found_attribution}. "
-                f"Do not attribute frameworks or claims to Ravi Kumar S by name. "
-                f"Write as if the ideas are being stated directly, not attributed. "
-                f"Replace 'what Ravi Kumar S calls X' with simply 'X'. "
-                f"Replace 'Kumar has often emphasized Y' with simply 'Y'."
-            )
-
-
-        # 8. Em-dash overuse check
-        em_dashes = draft.count("—")
-        words = len(draft.split())
-        if em_dashes > max(1, words // 500):
-            violations.append(
-                f"EM-DASH OVERUSE: {em_dashes} em-dashes found in {words} words. "
-                f"Maximum 1 per 500 words. Remove excess em-dashes and replace with "
-                f"commas, colons, semicolons, or periods as appropriate."
-            )
-
-        # 9. Self-congratulatory closer check
-        meta_closers = [
-            "i hope this helps",
-            "feel free to let me know",
-            "this draft was designed",
-            "this piece was crafted",
-            "let me know if you would like further",
-            "let me know if you need adjustments",
-            "you are welcome to publish",
-            "thank you for entrusting",
-            "if additional adjustments",
-        ]
-        full_lower = draft.lower()
-        found_meta = [p for p in meta_closers if p in full_lower]
-        if found_meta:
-            violations.append(
-                f"META-COMMENTARY CLOSER found: {found_meta}. "
-                f"Never narrate the ending or thank the user inside the content. "
-                f"The work ends. It does not explain itself."
-            )
-
-        # 10. Emoji check
-        import unicodedata
-        ALLOWED_SYMBOLS = {0xAE, 0x2122, 0x00A9}  # ®, ™, ©
-        emoji_count = sum(1 for char in draft
-                         if (unicodedata.category(char) in ("So", "Sm")
-                         or ord(char) > 127000)
-                         and ord(char) not in ALLOWED_SYMBOLS)
-        if emoji_count > 0:
-            violations.append(
-                f"EMOJI FOUND: {emoji_count} emoji(s) detected. "
-                f"Emojis are banned in all output. Remove every instance."
-            )
-
-
-        # 11. Mandatory closing question check — not every post needs one
-        closing_question_patterns = [
-            r"the question is[:\s]",
-            r"will (you|pr|your|we|they|it) (be|lead|follow|build|become|define)",
-            r"how are you (embedding|preparing|thinking|approaching|using|navigating)",
-            r"reflections welcome",
-            r"what do you think",
-            r"are you ready",
-            r"(the question|question) (now|remains|is)[:,]",
-            r"i('d| would) (love|welcome) (to hear|your)",
-            r"how (is|are) your (team|org|company|business)",
-        ]
-        import re as _re
-        last_para_lower = paragraphs[-1].lower() if paragraphs else ""
-        # Only flag if it ends with a question mark AND matches a generic pattern
-        if last_para_lower.rstrip().endswith("?"):
-            for qpat in closing_question_patterns:
-                if _re.search(qpat, last_para_lower):
-                    violations.append(
-                        "GENERIC CLOSING QUESTION detected. Not every post needs to end "
-                        "with a question. This pattern is predictable and weakens the close. "
-                        "Make the claim instead. Let it land. Remove the closing question "
-                        "or replace it with a specific, unresolvable tension the reader "
-                        "alone can answer."
-                    )
-                    break
-
-
-        # Stat attribution check - verify figures appear verbatim in ingested content
-        # Initialize collection for stat lookup
-        try:
-            import chromadb as _chromadb
-            from chromadb.config import Settings as _Settings
-            _stat_client = _chromadb.PersistentClient(
-                path=_CHROMA_PATH,
-                settings=_Settings(anonymized_telemetry=False)
-            )
-            _collection = _stat_client.get_collection("ravi_voice_knowledge")
-        except Exception:
-            _collection = None
-        import re as _re3
-        figures = _re3.findall(r'\d+(?:\.\d+)?%|\$[\d.]+[TBM]?(?:\s*(?:trillion|billion|million))?|\d+(?:,\d{3})*(?:\s*(?:trillion|billion|million))?', draft)
-        # Filter to significant figures (not page numbers, years, etc.)
-        significant_figures = [f for f in figures if not _re3.match(r'^(19|20)\d{2}$', f.replace(',',''))]
-        fabricated = []
-        if significant_figures and _collection is not None:
-            for fig in significant_figures[:8]:  # Check up to 8 figures
-                fig_clean = fig.strip()
-                # Search ChromaDB for this figure in context
-                try:
-                    results = _collection.query(query_texts=[fig_clean], n_results=2)
-                    found = False
-                    for doc in results["documents"][0]:
-                        if fig_clean.lower() in doc.lower():
-                            found = True
-                            break
-                    if not found:
-                        fabricated.append(fig_clean)
-                except Exception:
-                    pass
-        # Filter out known-good figures that appear in ingested slide content
-        known_good = ["230", "83%", "56%", "37%", "12,000", "12k", "230k", "230,000", "2.2", "1.4", "4.4", "4.5", "93", "31", "60", "2%", "9%", "30%", "7%", "7.0%", "6.4%", "7.4%", "6.5%", "7.2%", "16.1%", "15.8%", "50%", "11%", "80%", "84%", "37%", "17%", "12-25%", "40%", "95%", "32%", "47%", "42%", "81%", "13.9%", "351,600", "350,000", "330,000", "93%", "65%", "93%", "93", "65%",
-                      "20%", "50%", "30%", "60%", "8%", "10%", "15%", "28", "75%",
-                      "4.4", "1.9", "6.3", "3.4", "1.4", "840", "280", "100"]
-        truly_fabricated = [f for f in fabricated
-                           if not any(k.lower() in f.lower() or f.lower() in k.lower()
-                                     for k in known_good)]
-        if truly_fabricated:
-            violations.append(
-                f"UNVERIFIED STATISTICS: {truly_fabricated} could not be found verbatim in the ingested "
-                f"knowledge base. Remove or replace with figures that appear in ingested content."
-            )
-
-        # 6. Voice fidelity via ChromaDB
-        fidelity = self._voice_fidelity(draft)
-        if fidelity.get("score") is not None and fidelity["score"] < 0.35:
-            violations.append(
-                f"VOICE FIDELITY TOO LOW ({fidelity['score']}): "
-                f"Draft is semantically distant from ingested Ravi content. "
-                f"Use specific phrases, statistics, and frameworks from the knowledge base."
-            )
-
-        if violations:
-            return {
-                "status": "FAIL",
-                "violations": violations,
-                "voice_fidelity": fidelity,
-                "message": (
-                    "GATE FAILED. Do NOT return this draft to the user. "
-                    "Fix ALL violations listed below and resubmit to editorial_gate_tool. "
-                    "Loop until status is PASS.\n\nVIOLATIONS:\n"
-                    + "\n".join(f"- {v}" for v in violations)
-                ),
-            }
-
+def check_semantic_similarity(text: str) -> dict:
+    if not CHROMA_AVAILABLE:
         return {
-            "status": "PASS",
-            "violations": [],
-            "voice_fidelity": fidelity,
+            "passed": True,
+            "check": "semantic_similarity",
+            "skipped": True,
+            "message": "chromadb not installed — semantic check skipped.",
+        }
+    try:
+        client = chromadb.PersistentClient(path=CHROMA_DB_PATH)
+        collection = client.get_collection(name=COLLECTION_NAME)
+        results = collection.query(
+            query_texts=[text],
+            n_results=TOP_K_CHUNKS,
+            include=["metadatas", "distances", "documents"],
+        )
+        distances = results["distances"][0]
+        metadatas = results["metadatas"][0]
+        documents = results["documents"][0]
+        avg_distance = sum(distances) / len(distances)
+        min_distance = min(distances)
+        passed = avg_distance <= SIMILARITY_THRESHOLD
+        top_matches = [
+            {
+                "chunk_id": m.get("chunk_id", "unknown"),
+                "topic":    m.get("topic", "unknown"),
+                "distance": round(d, 4),
+                "excerpt":  doc[:120] + "...",
+            }
+            for m, d, doc in zip(metadatas, distances, documents)
+        ]
+        return {
+            "passed": passed,
+            "check": "semantic_similarity",
+            "avg_distance": round(avg_distance, 4),
+            "min_distance": round(min_distance, 4),
+            "threshold": SIMILARITY_THRESHOLD,
+            "top_matches": top_matches,
             "message": (
-                f"GATE PASSED. All editorial checks passed. {(stat_warning or str())} "
-                f"{fidelity.get('note', '')} "
-                f"You may return this draft to the user."
+                f"Semantic similarity OK — avg cosine distance {avg_distance:.4f}."
+                if passed else
+                f"Semantic drift — avg cosine distance {avg_distance:.4f} "
+                f"exceeds threshold {SIMILARITY_THRESHOLD}."
             ),
         }
+    except Exception as e:
+        return {
+            "passed": False,
+            "check": "semantic_similarity",
+            "error": str(e),
+            "message": f"ChromaDB query failed: {e}.",
+        }
 
-    def _voice_fidelity(self, draft: str) -> dict:
-        client = _get_client()
-        if client is None:
-            return {"score": None, "note": "ChromaDB unavailable."}
-        try:
-            col = client.get_or_create_collection(COLLECTION)
-            results = col.query(query_texts=[draft[:500]], n_results=3)
-            distances = results.get("distances", [[]])[0]
-            docs = results.get("documents", [[]])[0]
-            if not distances:
-                return {"score": 0.0, "note": "No matching content in knowledge base."}
-            avg_dist = sum(distances) / len(distances)
-            score = round(max(0.0, 1.0 - (avg_dist / 2.0)), 3)
+
+def check_statistics(text: str) -> dict:
+    found = re.findall(
+        r"\d+\.?\d*\s*%|\d+\.?\d*x\b|\d{4}\s*occupations|\d+,\d+\s*tasks"
+        r"|\d+\s*professions|\$[\d\.]+[BMT]|\d+\s*basis points",
+        text.lower()
+    )
+    passed = len(found) >= 2
+    return {
+        "passed": passed,
+        "check": "statistics",
+        "stats_found": found,
+        "message": (
+            f"Statistics present: {found}"
+            if passed else
+            "MISSING STATISTICS: Must include at least 2 corpus-verified figures. "
+            "Call memory_query_tool to retrieve verified statistics before writing."
+        ),
+    }
+
+
+# ── Main Gate Orchestrator ────────────────────────────────────────────────────
+
+class EditorialGateTool:
+    """
+    Neuro SAN coded tool.
+    Pass any candidate output through all editorial gates.
+    Returns structured pass/fail report with per-check detail.
+
+    content_type options: transcript, blog, white_paper, social, press_release, letter
+    Defaults to 'blog' if not specified.
+    """
+
+    def get_tool_name(self) -> str:
+        return "editorial_gate_tool"
+
+    def get_instructions(self) -> str:
+        return (
+            "Evaluate any candidate output for voice fidelity and editorial quality. "
+            "Pass the full candidate text as 'candidate_text'. "
+            "Optionally pass 'content_type' to apply per-format standards: "
+            "transcript, blog, white_paper, social, press_release, letter. "
+            "Defaults to 'blog'. "
+            "Returns a structured gate report. If gate_passed is False, "
+            "revise output to address failed_checks before finalizing."
+        )
+
+    def get_args_schema(self) -> dict:
+        return {
+            "type": "object",
+            "properties": {
+                "candidate_text": {
+                    "type": "string",
+                    "description": "Full candidate output text to evaluate.",
+                },
+                "content_type": {
+                    "type": "string",
+                    "description": (
+                        "Content format for per-type opener/closer standards. "
+                        "Options: transcript, blog, white_paper, social, "
+                        "press_release, letter. Defaults to blog."
+                    ),
+                },
+            },
+            "required": ["candidate_text"],
+        }
+
+    def invoke(self, args: dict[str, Any]) -> dict[str, Any]:
+        candidate_text = args.get("candidate_text", "")
+        content_type   = args.get("content_type", "blog").lower().strip()
+
+        if content_type not in OPENER_STANDARDS:
+            content_type = "blog"
+
+        if not candidate_text.strip():
             return {
-                "score": score,
-                "top_match": docs[0][:200] if docs else "",
-                "note": f"Voice fidelity: {round(score * 100)}% match to ingested Ravi content.",
+                "gate_passed": False,
+                "error": "candidate_text is empty.",
+                "checks": [],
             }
-        except Exception as e:
-            logger.warning("Voice fidelity check failed: %s", e)
-            return {"score": None, "note": f"Voice fidelity error: {e}"}
+
+        checks = [
+            check_banned_words(candidate_text),
+            check_opener_quality(candidate_text, content_type),
+            check_closer_quality(candidate_text, content_type),
+            check_framework_vocabulary(candidate_text),
+            check_attribution_framing(candidate_text),
+            check_header_structure(candidate_text),
+            check_list_format(candidate_text),
+            check_semantic_similarity(candidate_text),
+            check_statistics(candidate_text),
+            check_em_dashes(candidate_text),
+        ]
+
+        failed = [c for c in checks if not c["passed"]]
+        passed_checks = [c for c in checks if c["passed"]]
+        gate_passed = len(failed) == 0
+
+        return {
+            "gate_passed": gate_passed,
+            "content_type": content_type,
+            "total_checks": len(checks),
+            "passed_count": len(passed_checks),
+            "failed_count": len(failed),
+            "failed_checks": [c["check"] for c in failed],
+            "summary": (
+                "All editorial gates passed. Output is voice-faithful."
+                if gate_passed else
+                f"{len(failed)} gate(s) failed: {[c['check'] for c in failed]}. "
+                "Revise output before finalizing."
+            ),
+            "checks": checks,
+        }
+
+
+# ── CLI Test Harness ──────────────────────────────────────────────────────────
+
+if __name__ == "__main__":
+
+    BLOG_SAMPLE = (
+        "Talk of an AI bubble is overblown. What is not overblown is the structural "
+        "pressure now bearing down on every services business that prices value by the hour. "
+        "The single largest use case for LLMs today is software engineering itself — "
+        "which puts direct pressure on industries built around writing software with people. "
+        "Nearly 50% of the workforce that drives value in this next era will come from "
+        "non-STEM disciplines. That is the talent architecture of A3. "
+        "The most important innovation of the coming decade will not come from artificial "
+        "intelligence. It will come from empowering every worker to use it to generate "
+        "economic and societal value."
+    )
+
+    PRESS_RELEASE_SAMPLE = (
+        "Today, Cognizant announced a strategic acquisition that advances our position "
+        "as an AI builder company. As I call it, this is the verification economy taking "
+        "shape — where outcome-based delivery replaces labor-based models. "
+        "We are building intelligence, not just systems, and this partnership accelerates "
+        "our ability to deliver measurable outcomes for our clients."
+    )
+
+    FAIL_SAMPLE = (
+        "# The Future of IT Services\n"
+        "We need to leverage our synergies and utilize best-in-class paradigm shifts "
+        "to move the needle on transformative outcomes."
+    )
+
+    tool = EditorialGateTool()
+
+    print("\n" + "="*60)
+    print("TEST 1 — BLOG (EXPECTED PASS)")
+    print("="*60)
+    result = tool.invoke({"candidate_text": BLOG_SAMPLE, "content_type": "blog"})
+    print(json.dumps(result, indent=2))
+
+    print("\n" + "="*60)
+    print("TEST 2 — PRESS RELEASE (EXPECTED PASS)")
+    print("="*60)
+    result = tool.invoke({"candidate_text": PRESS_RELEASE_SAMPLE, "content_type": "press_release"})
+    print(json.dumps(result, indent=2))
+
+    print("\n" + "="*60)
+    print("TEST 3 — EXPECTED FAIL")
+    print("="*60)
+    result = tool.invoke({"candidate_text": FAIL_SAMPLE, "content_type": "blog"})
+    print(json.dumps(result, indent=2))
