@@ -30,6 +30,8 @@ class RaviGatedPublisher(CodedTool):
     """
 
     def invoke(self, args: dict, sly_data: dict = None) -> dict:
+        if isinstance(args, dict) and "args" in args:
+            args = args["args"]
         # Accept request under multiple possible key names
         request = (
             args.get("request")
@@ -38,6 +40,14 @@ class RaviGatedPublisher(CodedTool):
             or args.get("query")
             or str(args)
         )
+
+        # Detect quote mode — relaxes word count and stat thresholds in the gate
+        QUOTE_TRIGGERS = [
+            'press release quote', 'single quote', 'quote only',
+            'one quote', 'a quote from', 'quote from ravi',
+            '2-3 sentence', '2 to 3 sentence', 'quotable passage',
+        ]
+        is_quote_mode = any(t in request.lower() for t in QUOTE_TRIGGERS)
 
         # Step 1: Query memory
         context = self._query_memory(request)
@@ -75,7 +85,9 @@ class RaviGatedPublisher(CodedTool):
             # Remove lone small percentages that are likely fabricated
             import re as _re3
             # Replace isolated small percentages not in known-good list with prose
-            known_pct = ['93%', '83%', '56%', '50%', '20%', '65%', '30%', '70%', '8%', '10%']
+            known_pct = ['93%', '83%', '56%', '50%', '20%', '65%', '30%', '70%', '8%', '10%'
+                '2%', '9%', '14%', '3.9%', '10%', '5%',
+            ]
             def replace_unknown_pct(m):
                 p = m.group(0)
                 return p if p in known_pct else 'a significant portion'
@@ -91,7 +103,7 @@ class RaviGatedPublisher(CodedTool):
             draft = draft.replace(' cusp ', ' threshold ')
             draft = draft.replace('cusp of', 'threshold of')
 
-            result = gate.invoke({"draft": draft})
+            result = gate.invoke({"draft": draft, "quote_mode": is_quote_mode})
 
             if result.get("status") == "PASS":
                 return {
@@ -106,10 +118,10 @@ class RaviGatedPublisher(CodedTool):
 
         # Return best effort after 7 attempts
         return {
-            "status": "BEST_EFFORT",
-            "draft": draft,
+            "status": "GATE_FAILURE",
+            "draft": None,
             "violations": result.get("violations", []),
-            "message": "Gate did not pass after 7 attempts. Returning best effort draft.",
+            "message": "Gate did not pass after 7 attempts. Draft suppressed.",
         }
 
     # -------------------------------------------------------------------------
@@ -218,11 +230,29 @@ class RaviGatedPublisher(CodedTool):
 Writing guidelines:
 - Write in flowing prose paragraphs. Avoid numbered lists, bullet points, and section headers.
 - Only reference the Hollywood Model of delivery if the request is specifically about staffing, talent models, or team structure. Do not insert it generically into posts about other topics.
-- The opening sentence must be one of these patterns: a bold claim ("Talk of an AI bubble is overblown."), a rhetorical provocation ("What happens when society embraces a technology faster than it can absorb its consequences?"), or a direct statistic from the source material below (e.g., "The yearly rate of jobs impacted by AI has jumped from 2% to 9% annually." or "Over 93% of U.S. jobs are now impacted by AI in some capacity."). Avoid opening with "In today's", "As the world", "The AI adoption", or any general landscape-setting phrase.
-- Use at least 2 specific statistics drawn from the source material provided below. Copy figures exactly as they appear in the source material. Only use figures that appear explicitly in the source material below.
+- The opening sentence must be one of these patterns: a bold claim, a rhetorical provocation, or a direct statistic from the source material below. Avoid opening with "In today's", "As the world", "The AI adoption", or any general landscape-setting phrase.
+- BANNED OPENERS — do not use these under any circumstances, they have already been used: "Talk of an AI bubble is overblown.", "The evidence is in the numbers.", "The yearly rate of jobs impacted by AI has jumped from", "Over 93% of U.S. jobs are now impacted by AI in some capacity."
+- For Q1 2026 earnings content, use one of these specific openers: "We delivered a solid first quarter, with revenue growth in the upper half of our guidance range." OR "Financial Services grew more than 10% year-over-year in constant currency this quarter." OR "Q1 bookings grew 21% year-over-year. That number is not accidental." OR "Nearly 40% of our code is now AI-assisted." OR "I believe our work to become the world's pre-eminent AI builder is resonating, demonstrated by our first quarter performance."
+- Use at least 2 specific statistics drawn from the source material provided below. Copy figures exactly as they appear in the source material.
+- The following Q1 2026 figures are VERIFIED and may be used exactly as written — do not substitute these with vague language under any circumstances:
+  Revenue: $5.41 billion, up 5.8% year-over-year
+  Adjusted EPS: $1.40, up 14% year-over-year
+  Q1 bookings growth: 21% year-over-year
+  Trailing 12-month bookings: $29.6 billion
+  Large deals signed: 7, including 1 mega deal over $500 million
+  Financial Services growth: more than 10% in constant currency
+  AI engagements: more than 5,000 across all three vectors
+  AI-assisted code: nearly 40%
+  AI patents: 65 in the U.S., 88 globally
+  Project Leap savings target: $200 to $300 million in 2026
+  Adjusted operating margin guidance: 16.0% to 16.2%
+  Employees hired in 2025: around 20,000 freshers
+  Adjusted operating margin expansion: 5th straight quarter of year-over-year expansion
 - Use em-dashes sparingly — at most one per 500 words. Replace extras with commas, colons, or periods.
 - Close with a declarative forward-looking statement. End with a declarative statement. Avoid closing questions or meta-commentary after the post ends. 
-- Avoid these words: paradigm, robust, pivotal, tapestry, delve, unprecedented, seamlessly, transformative.
+- Avoid these words entirely: paradigm, robust, pivotal, tapestry, delve, unprecedented, seamlessly, transformative, ecosystem, revolutionary, cutting-edge, best-in-class, world-class, robust, actionable insights, thought leader.
+- Attribution framing is mandatory: include at least one of these phrases naturally in the text: "as I call it", "as we call it", "what I mean by", "I have spoken about this", "what we call", "in my view".
+- Closing sentence is mandatory: end with a declarative forward-looking statement matching one of these patterns: "will come from", "will not come from", "the ones who", "that is the", "will define", "will redefine", "the most important".
 
 Source material to draw from:
 {context if context else "Use your knowledge of Cognizant strategy and Ravi Kumar S public communications."}
