@@ -492,7 +492,12 @@ class EditorialGateTool:
         }
 
     def invoke(self, args: dict[str, Any]) -> dict[str, Any]:
-        candidate_text = args.get("candidate_text", "")
+        candidate_text = (
+            args.get("candidate_text")
+            or args.get("draft")
+            or args.get("text")
+            or ""
+        )
         content_type   = args.get("content_type", "blog").lower().strip()
 
         if content_type not in OPENER_STANDARDS:
@@ -524,6 +529,8 @@ class EditorialGateTool:
 
         return {
             "gate_passed": gate_passed,
+            "status": "PASS" if gate_passed else "GATE_FAILURE",
+            "violations": [c["message"] for c in failed],
             "content_type": content_type,
             "total_checks": len(checks),
             "passed_count": len(passed_checks),
