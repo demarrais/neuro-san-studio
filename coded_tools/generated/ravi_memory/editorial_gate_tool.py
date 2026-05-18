@@ -6,12 +6,13 @@ Enforces voice fidelity, editorial quality, and semantic similarity
 against the verbatim transcript stored in ChromaDB (ravi_voice_primary).
 
 Supports content_type parameter for per-format opener/closer standards:
-  transcript   — verbatim spoken word (default, strictest)
-  blog         — written long-form thought leadership
-  white_paper  — formal research/policy document
-  social       — LinkedIn or short-form post
-  press_release — quote or statement for media
-  letter       — direct address to an individual or group
+  transcript     — verbatim spoken word (default, strictest)
+  blog           — written long-form thought leadership
+  white_paper    — formal research/policy document
+  social         — LinkedIn or short-form post
+  press_release  — quote or statement for media
+  letter         — direct address to an individual or group
+  associate_email — all-associate (all-employee) internal email
 
 Neuro SAN coded tool — invoke via agent network or CLI test harness.
 """
@@ -126,6 +127,28 @@ OPENER_STANDARDS = {
             "First person, reflective or purposeful tone."
         ),
     },
+    "associate_email": {
+        "signals": [
+            "team cognizant,",
+            "dear team cognizant,",
+            "today, we announced",
+            "today, we",
+            "i am pleased to share",
+            "i am proud to share",
+            "i am excited to share",
+            "i am delighted to share",
+            "i am thrilled to announce",
+            "we are off to",
+            "our momentum",
+            "i have just returned",
+            "as we",
+            "last year, we",
+        ],
+        "description": (
+            "Must open with 'Team Cognizant,' on its own line. "
+            "Sentence 1 states the news directly. No preamble."
+        ),
+    },
 }
 
 CLOSER_STANDARDS = {
@@ -201,6 +224,27 @@ CLOSER_STANDARDS = {
         "description": (
             "Letter closer should end with gratitude, forward orientation, "
             "or a call to shared action."
+        ),
+    },
+    "associate_email": {
+        "signals": [
+            "best regards,",
+            "warm regards,",
+            "onward together",
+            "with appreciation,",
+            "with deep appreciation,",
+            "ravi kumar s",
+            "ravi kumar s, ceo",
+            "thank you for",
+            "thank you all",
+        ],
+        "description": (
+            "Must close with proper sign-off phrase followed by 'Ravi Kumar S, CEO'. "
+            "Valid sign-offs: 'Best regards,' / 'Best Regards,' / "
+            "'Warm Regards,' (CSR/community) / 'Onward together,' (momentum) / "
+            "'With appreciation,' (personal/career). "
+            "Never use: 'Kind regards', 'Take care', 'Best wishes'. "
+            "Never omit the sign-off block."
         ),
     },
 }
@@ -453,7 +497,8 @@ class EditorialGateTool:
     Pass any candidate output through all editorial gates.
     Returns structured pass/fail report with per-check detail.
 
-    content_type options: transcript, blog, white_paper, social, press_release, letter
+    content_type options:
+        transcript, blog, white_paper, social, press_release, letter, associate_email
     Defaults to 'blog' if not specified.
     """
 
@@ -465,7 +510,7 @@ class EditorialGateTool:
             "Evaluate any candidate output for voice fidelity and editorial quality. "
             "Pass the full candidate text as 'candidate_text'. "
             "Optionally pass 'content_type' to apply per-format standards: "
-            "transcript, blog, white_paper, social, press_release, letter. "
+            "transcript, blog, white_paper, social, press_release, letter, associate_email. "
             "Defaults to 'blog'. "
             "Returns a structured gate report. If gate_passed is False, "
             "revise output to address failed_checks before finalizing."
@@ -484,7 +529,7 @@ class EditorialGateTool:
                     "description": (
                         "Content format for per-type opener/closer standards. "
                         "Options: transcript, blog, white_paper, social, "
-                        "press_release, letter. Defaults to blog."
+                        "press_release, letter, associate_email. Defaults to blog."
                     ),
                 },
             },
@@ -498,7 +543,7 @@ class EditorialGateTool:
             or args.get("text")
             or ""
         )
-        content_type   = args.get("content_type", "blog").lower().strip()
+        content_type = args.get("content_type", "blog").lower().strip()
 
         if content_type not in OPENER_STANDARDS:
             content_type = "blog"
@@ -576,6 +621,24 @@ if __name__ == "__main__":
         "to move the needle on transformative outcomes."
     )
 
+    ASSOCIATE_EMAIL_SAMPLE = (
+        "Team Cognizant,\n\n"
+        "Today, we announced first quarter results. Our performance validates our AI builder "
+        "strategy and underscores the need for disciplined delivery. Against a backdrop of "
+        "rapid technological change, we grew revenues 5.8% year-over-year to $5.41 billion, "
+        "expanded adjusted operating margin, and delivered bookings growth of 21%. "
+        "Please take a moment to watch this message from Jatin Dalal, our Chief Financial "
+        "Officer, and me as we share reflections on the quarter and the opportunities ahead.\n\n"
+        "We also introduced Project Leap, our initiative to accelerate our transition to the "
+        "operating model of the future. What I mean by this is simple: our ability to thrive "
+        "will come from our ability to focus, simplify, and execute with precision. "
+        "The savings generated — outcome-based reinvestment, not cost-cutting for its own sake "
+        "— will fund our AI builder capabilities and partnerships. This is the labor-based to "
+        "outcome-based shift playing out in our own operations.\n\n"
+        "Thank you for your focus, your resilience, and your commitment to building our future together.\n\n"
+        "Best regards,\n\nRavi Kumar S, CEO"
+    )
+
     tool = EditorialGateTool()
 
     print("\n" + "="*60)
@@ -594,4 +657,10 @@ if __name__ == "__main__":
     print("TEST 3 — EXPECTED FAIL")
     print("="*60)
     result = tool.invoke({"candidate_text": FAIL_SAMPLE, "content_type": "blog"})
+    print(json.dumps(result, indent=2))
+
+    print("\n" + "="*60)
+    print("TEST 4 — ASSOCIATE EMAIL (EXPECTED PASS)")
+    print("="*60)
+    result = tool.invoke({"candidate_text": ASSOCIATE_EMAIL_SAMPLE, "content_type": "associate_email"})
     print(json.dumps(result, indent=2))
