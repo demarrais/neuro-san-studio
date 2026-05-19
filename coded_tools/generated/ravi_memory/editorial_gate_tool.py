@@ -51,6 +51,35 @@ BANNED_WORDS = [
     "at the forefront", "ensures", "hopefully", "we trust",
     "leaning into", "reshaping the playing field",
 ]
+# Talk Track: spoken-voice constants (Talk Track Module Davos 2026)
+TALK_TRACK_OPENER_PATTERNS = [
+    "if we take a step back", "there are two different things",
+    "there's a paradox", "there is a paradox", "i'd frame it this way",
+    "the real question is", "let me make this tangible",
+    "let me give you a concrete example", "we've seen this before",
+    "i believe", "i've argued", "i call this", "we call this",
+    "the issue isn't", "the bottleneck isn't",
+    "it's not about the technology", "what's interesting is",
+]
+TALK_TRACK_FRAMEWORKS = [
+    "ai velocity gap", "velocity gap", "purposeful problem finder",
+    "hollywood model", "vector 1", "vector 2", "vector 3",
+    "context engineering", "contextfabric", "safe autonomy",
+    "intelligent economy", "great equalizer", "great leveler",
+    "industrial transformation",
+]
+TALK_TRACK_STATS = [
+    "93%", "4.5 trillion", "$4.5", "57% to 32%", "57%",
+    "15% to 40%", "37%", "17%", "18%", "30x",
+    "120 million", "2 million", "1,000 context", "350,000",
+]
+TALK_TRACK_BANNED = [
+    "i am pleased to announce", "team cognizant,", "going forward",
+    "impactful", "i think maybe", "it could potentially",
+    "synergize", "in conclusion", "to summarize",
+]
+
+
 
 # ── Per-Content-Type Opener/Closer Standards ──────────────────────────────────
 
@@ -113,6 +142,20 @@ OPENER_STANDARDS = {
         "description": (
             "Press release opener should state the news, company, or action directly. "
             "Ravi quotes should anchor on strategic significance, not pleasantries."
+        ),
+    },
+    "talk_track": {
+        "signals": [
+            "if we take a step back", "there are two different things",
+            "there's a paradox", "i'd frame it this way",
+            "the real question is", "let me make this tangible",
+            "we've seen this before", "i believe", "i've argued",
+            "i call this", "the issue isn't", "the bottleneck isn't",
+        ],
+        "description": (
+            "Talk track opener must reframe the premise — never directly answer. "
+            "Required: 'If we take a step back...', 'There are two different things...', "
+            "'I believe...', 'The real question is...', 'Let me make this tangible...'"
         ),
     },
     "letter": {
@@ -213,6 +256,10 @@ CLOSER_STANDARDS = {
             "Press release quote closer should land on strategic significance "
             "or client/market impact. Not a pleasantry."
         ),
+    },
+    "talk_track": {
+        "signals": ["the organizations that will win", "this is the opportunity", "that is why cognizant", "the real lever", "democratized, resilient", "human-centered"],
+        "description": "Talk track closer must be an implication for leaders, never a data point.",
     },
     "letter": {
         "signals": [
@@ -557,6 +604,8 @@ class EditorialGateTool:
 
         checks = [
             check_banned_words(candidate_text),
+            *([check_talk_track_format(candidate_text)]
+              if content_type == "talk_track" else []),
             check_opener_quality(candidate_text, content_type),
             check_closer_quality(candidate_text, content_type),
             check_framework_vocabulary(candidate_text),
