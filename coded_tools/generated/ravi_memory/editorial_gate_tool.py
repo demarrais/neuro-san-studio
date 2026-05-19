@@ -333,6 +333,61 @@ def check_banned_words(text: str) -> dict:
     }
 
 
+def check_talk_track_format(text: str) -> dict:
+    """Gate checks for talk_track content type. Source: Talk Track Module Sec 1.2-1.9"""
+    import re as _re
+    violations = []
+    lines = [ln.strip() for ln in text.split("\n") if ln.strip()]
+    if not lines:
+        return {"check": "talk_track_format", "passed": False, "message": "Empty draft."}
+
+    BULLETS = ("- ", "\u2022 ", "* ", "\u00b7 ")
+    def is_bullet(ln):
+        return any(ln.startswith(m) for m in BULLETS) or bool(_re.match(r"^\d+[.):]\s", ln))
+
+    clines = [ln for ln in lines if len(ln) > 4]
+    bcount = sum(1 for ln in clines if is_bullet(ln))
+    if clines and bcount < len(clines) * 0.45:
+        violations.append("TALK TRACK FORMAT: Must be bullet-point format, not prose paragraphs.")
+
+    first = " ".join(lines[:3]).lower()
+    if not any(p in first for p in TALK_TRACK_OPENER_PATTERNS):
+        violations.append("WEAK OPENER: Must open with reframe or paradox. "
+                          "Required: If we take a step back / There are two different things / "
+                          "I believe / The real question is / Let me make this tangible")
+
+    full_lower = text.lower()
+    if not any(fw in full_lower for fw in TALK_TRACK_FRAMEWORKS):
+        violations.append("MISSING FRAMEWORK: Must name at least one owned framework: "
+                          "AI Velocity Gap, Purposeful Problem Finders, Hollywood Model, "
+                          "Three Vectors V1/V2/V3, Context Engineering, Safe Autonomy, "
+                          "Intelligent Economy.")
+
+    if not any(s in text for s in TALK_TRACK_STATS):
+        violations.append("MISSING DATA POINT: Include a signature statistic: "
+                          "93pct jobs exposed, 4.5T labor productivity, "
+                          "37pct vs 17pct productivity boost, 57pct->32pct non-automatable, "
+                          "1000 context engineers.")
+
+    last = " ".join(lines[-3:]) if len(lines) >= 3 else " ".join(lines)
+    has_trailing_stat = bool(_re.search(r"\d+\s*%|\d+(\.\d+)?\s*(trillion|billion|million)", last, _re.I))
+    if has_trailing_stat:
+        violations.append("WEAK CLOSER: Must close on an implication for leaders, not a data point. "
+                          "Required: The organizations that will win / This is the opportunity of our time.")
+
+    for phrase in TALK_TRACK_BANNED:
+        if phrase in full_lower:
+            violations.append("BANNED TALK TRACK PHRASE: " + phrase + " -- remove per Talk Track Module Sec 1.9.")
+
+    passed = len(violations) == 0
+    return {
+        "check": "talk_track_format",
+        "passed": passed,
+        "violations": violations,
+        "message": "Talk track format check passed." if passed else str(len(violations)) + " violation(s): " + "; ".join(violations[:2]),
+    }
+
+
 def check_opener_quality(text: str, content_type: str = "blog") -> dict:
     standard = OPENER_STANDARDS.get(content_type, OPENER_STANDARDS["blog"])
     first_150 = text[:150].lower()
