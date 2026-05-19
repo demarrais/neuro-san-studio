@@ -158,6 +158,17 @@ OPENER_STANDARDS = {
             "'I believe...', 'The real question is...', 'Let me make this tangible...'"
         ),
     },
+    "analysis": {
+        "signals": [
+            "framework", "present", "absent", "missing", "the script",
+            "section", "dimension", "review", "evaluated", "note that",
+            "the speech", "recommend", "gap", "underweighted", "appears",
+        ],
+        "description": (
+            "Analysis/review outputs — permissive opener. "
+            "Not subject to spoken-voice opener requirements."
+        ),
+    },
     "letter": {
         "signals": [
             "i am writing", "i want to", "as we", "over the past",
@@ -260,6 +271,16 @@ CLOSER_STANDARDS = {
     "talk_track": {
         "signals": ["the organizations that will win", "this is the opportunity", "that is why cognizant", "the real lever", "democratized, resilient", "human-centered"],
         "description": "Talk track closer must be an implication for leaders, never a data point.",
+    },
+    "analysis": {
+        "signals": [
+            "recommend", "insert", "strengthen", "consider", "overall",
+            "in summary", "the script", "adding", "the gap",
+        ],
+        "description": (
+            "Analysis/review outputs — permissive closer. "
+            "Not subject to spoken-voice closer requirements."
+        ),
     },
     "letter": {
         "signals": [
@@ -663,12 +684,12 @@ class EditorialGateTool:
               if content_type == "talk_track" else []),
             check_opener_quality(candidate_text, content_type),
             check_closer_quality(candidate_text, content_type),
-            check_framework_vocabulary(candidate_text),
+            *([check_framework_vocabulary(candidate_text)] if content_type not in ("talk_track", "analysis") else []),
             check_attribution_framing(candidate_text),
             check_header_structure(candidate_text),
             check_list_format(candidate_text),
             check_semantic_similarity(candidate_text),
-            check_statistics(candidate_text),
+            *([check_statistics(candidate_text)] if content_type not in ("talk_track", "analysis") else []),
             check_em_dashes(candidate_text),
         ]
 
